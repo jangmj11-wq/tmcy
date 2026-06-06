@@ -143,8 +143,13 @@
   .budget-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
 
   /* ── 토스트 ── */
-  #toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-10px); background: var(--green); color: #fff; padding: 11px 24px; border-radius: 30px; font-weight: 700; font-size: 14px; z-index: 999; box-shadow: 0 4px 20px rgba(16,185,129,0.35); pointer-events: none; opacity: 0; transition: all 0.3s; white-space: nowrap; }
+  #toast { position: fixed; top: 0; left: 50%; transform: translateX(-50%) translateY(-110%); background: var(--white); padding: 14px 24px; border-radius: 0 0 20px 20px; z-index: 999; box-shadow: 0 6px 24px rgba(0,0,0,0.10); pointer-events: none; opacity: 0; transition: all 0.38s cubic-bezier(0.34,1.4,0.64,1); display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-top: none; }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast-icon { width: 30px; height: 30px; border-radius: 50%; background: var(--green); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 15px; flex-shrink: 0; animation: popIn 0.4s cubic-bezier(0.34,1.56,0.64,1) both; }
+  .toast-body { display: flex; flex-direction: column; }
+  .toast-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .toast-sub   { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  @keyframes popIn { from { transform: scale(0) rotate(-20deg); } to { transform: scale(1) rotate(0deg); } }
 
   /* ── 모달 ── */
   .modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.5); z-index: 100; display: flex; align-items: flex-end; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
@@ -199,7 +204,13 @@
 </head>
 <body>
 <div id="app">
-  <div id="toast"></div>
+  <div id="toast">
+    <div class="toast-icon" id="toastIcon">✓</div>
+    <div class="toast-body">
+      <div class="toast-title" id="toastTitle"></div>
+      <div class="toast-sub"  id="toastSub"></div>
+    </div>
+  </div>
 
   <!-- ── 헤더 ── -->
   <div class="header">
@@ -430,7 +441,7 @@ async function handleAdd() {
   await addTx({ type:formType, category:cat, amount:amt, note, date: date||new Date().toISOString().slice(0,10) });
   document.getElementById("fAmt").value="";
   document.getElementById("fNote").value="";
-  showToast("✓ 추가됐어요!");
+  showToast("추가됐어요!", fmt(amt) + " · " + (note||getCat(cat).label));
 }
 
 async function handleDelete(id) {
@@ -636,10 +647,22 @@ function saveFirebaseConfig() {
 function setMonth(i) { filterMonth=i; render(); }
 function setStatsSubTab(t) { statsSubTab=t; renderStats(); }
 
-function showToast(msg) {
-  const t=document.getElementById("toast");
-  t.textContent=msg; t.classList.add("show");
-  setTimeout(()=>t.classList.remove("show"), 2200);
+function showToast(msg, sub) {
+  const t     = document.getElementById("toast");
+  const icon  = document.getElementById("toastIcon");
+  const title = document.getElementById("toastTitle");
+  const subEl = document.getElementById("toastSub");
+  title.textContent = msg;
+  subEl.textContent = sub || "";
+  // 아이콘 애니메이션 재실행
+  icon.style.animation = "none";
+  icon.offsetHeight; // reflow
+  icon.style.animation = "";
+  t.classList.remove("show");
+  void t.offsetWidth;
+  t.classList.add("show");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("show"), 2400);
 }
 
 // ══════════════════════════════════════════
