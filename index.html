@@ -223,6 +223,17 @@
     <button class="tab-btn"        onclick="setTab('settings')" id="tab-settings"><span class="icon">⚙️</span>설정</button>
   </div>
 
+  <!-- ── 영수증 스캔 모달 ── -->
+  <div class="modal-overlay" id="scanModal" onclick="closeScanModal(event)">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <div><div style="font-size:17px;font-weight:700">📸 영수증 스캔</div><div style="font-size:12px;color:var(--muted);margin-top:2px">AI가 자동으로 내역을 추출해요</div></div>
+        <button class="modal-close" onclick="closeScan()">✕</button>
+      </div>
+      <div id="scanBody"></div>
+    </div>
+  </div>
+
   <!-- ── 명세서 모달 ── -->
   <div class="modal-overlay" id="pasteModal" onclick="closePasteModal(event)">
     <div class="modal-sheet">
@@ -378,6 +389,9 @@ function renderInput() {
   document.getElementById("content").innerHTML = `
   <div class="card" style="margin-top:16px">
     <div style="font-size:15px;font-weight:700;margin-bottom:16px">새 내역 추가</div>
+    <button class="ai-btn" style="border-color:#ede9fe;background:#f5f3ff;color:#7c3aed" onclick="openScan()">
+      <span style="font-size:18px">📸</span> 영수증 사진으로 자동 입력 <span class="ai-badge" style="background:#7c3aed">AI</span>
+    </button>
     <button class="ai-btn" style="border-color:#e0e7ff;background:#eef2ff;color:#6366f1" onclick="openPaste()">
       <span style="font-size:18px">📋</span> 카드 명세서 붙여넣기 <span class="ai-badge" style="background:#6366f1">AI</span>
     </button>
@@ -626,6 +640,132 @@ function showToast(msg) {
   const t=document.getElementById("toast");
   t.textContent=msg; t.classList.add("show");
   setTimeout(()=>t.classList.remove("show"), 2200);
+}
+
+// ══════════════════════════════════════════
+//  영수증 스캔 (AI)
+// ══════════════════════════════════════════
+function openScan() {
+  document.getElementById("scanBody").innerHTML = renderScanUpload();
+  document.getElementById("scanModal").classList.add("open");
+}
+function closeScanModal(e) { if(e.target===document.getElementById("scanModal")) closeScan(); }
+function closeScan() { document.getElementById("scanModal").classList.remove("open"); }
+
+function renderScanUpload() {
+  return `
+    <div id="scanDropzone" onclick="document.getElementById('scanFileInput').click()" style="border:2px dashed #e0e7ff;border-radius:14px;min-height:150px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#f8fafc;margin-bottom:14px;overflow:hidden">
+      <div style="text-align:center;color:#94a3b8;padding:20px">
+        <div style="font-size:36px;margin-bottom:8px">📷</div>
+        <div style="font-size:14px;font-weight:600;color:#64748b">사진을 선택하거나 찍어주세요</div>
+        <div style="font-size:12px;margin-top:4px">영수증, 카드 명세서, 메모 등</div>
+      </div>
+    </div>
+    <input type="file" id="scanFileInput" accept="image/*" capture="environment" style="display:none" onchange="handleScanFile(this)" />`;
+}
+
+function handleScanFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const dataUrl = ev.target.result;
+    const base64  = dataUrl.split(",")[1];
+    const mime    = file.type || "image/jpeg";
+    // 미리보기
+    document.getElementById("scanDropzone").innerHTML = `<img src="${dataUrl}" style="width:100%;max-height:240px;object-fit:contain" />`;
+    // AI 분석 버튼 추가
+    const existing = document.getElementById("scanAnalyzeBtn");
+    if (!existing) {
+      const btn = document.createElement("button");
+      btn.id = "scanAnalyzeBtn";
+      btn.style.cssText = "width:100%;padding:13px;border-radius:12px;border:none;background:#7c3aed;color:#fff;font-weight:700;font-size:15px;font-family:var(--font);margin-bottom:12px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer";
+      btn.innerHTML = "✨ AI로 자동 인식하기";
+      btn.onclick = () => runScanAI(base64, mime);
+      document.getElementById("scanBody").appendChild(btn);
+      // 다시찍기 버튼
+      const resetBtn = document.createElement("button");
+      resetBtn.style.cssText = "width:100%;padding:11px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#94a3b8;font-size:13px;font-family:var(--font);cursor:pointer";
+      resetBtn.innerHTML = "🔄 다른 사진으로 다시 시도";
+      resetBtn.onclick = () => { document.getElementById("scanBody").innerHTML = renderScanUpload(); };
+      document.getElementById("scanBody").appendChild(resetBtn);
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function runScanAI(base64, mime) {
+  const btn = document.getElementById("scanAnalyzeBtn");
+  if (btn) { btn.innerHTML = '<span style="width:16px;height:16px;border:2px solid #c4b5fd;border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite"></span> AI 분석 중...'; btn.disabled = true; }
+
+  // 기존 결과/에러 제거
+  document.querySelectorAll(".scan-result,.scan-error").forEach(e=>e.remove());
+
+  const today = new Date().toISOString().slice(0,10);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        model:"claude-sonnet-4-20250514", max_tokens:500,
+        system:`영수증 이미지를 분석해 JSON 객체만 반환하세요. { 로 시작하는 JSON만 출력, 설명 없이.
+형식: {"type":"expense","category":"food","amount":17420,"note":"이마트","date":"${today}"}
+카테고리: food,transport,shopping,culture,health,housing,education,other_expense,salary,freelance,investment,other_income
+amount는 숫자만(쉼표 제거). 날짜 없으면 ${today}.`,
+        messages:[{role:"user",content:[
+          {type:"image",source:{type:"base64",media_type:mime,data:base64}},
+          {type:"text",text:"이 영수증의 거래 내역을 JSON으로 추출해주세요."}
+        ]}]
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    let raw = data.content.map(i=>i.text||"").join("").trim().replace(/```[a-z]*/gi,"").trim();
+    const s=raw.indexOf("{"), e=raw.lastIndexOf("}");
+    if(s===-1||e<s) throw new Error("JSON을 찾지 못했어요");
+    const parsed = JSON.parse(raw.slice(s,e+1));
+    if(!parsed.amount) throw new Error("금액 인식 실패");
+    parsed.amount = Number(String(parsed.amount).replace(/,/g,""));
+    parsed.date   = parsed.date || today;
+    parsed.type   = parsed.type || "expense";
+    parsed.category = parsed.category || "other_expense";
+    showScanResult(parsed);
+  } catch(err) {
+    const div = document.createElement("div");
+    div.className = "scan-error error-box";
+    div.style.marginTop = "10px";
+    div.textContent = "⚠️ 인식 실패: " + err.message;
+    document.getElementById("scanBody").appendChild(div);
+  } finally {
+    if (btn) { btn.innerHTML = "✨ AI로 자동 인식하기"; btn.disabled = false; }
+  }
+}
+
+function showScanResult(r) {
+  document.querySelectorAll(".scan-result").forEach(e=>e.remove());
+  const allCatOpts = [...CATS.expense,...CATS.income].map(c=>`<option value="${c.id}"${c.id===r.category?" selected":""}>${c.emoji} ${c.label}</option>`).join("");
+  const div = document.createElement("div");
+  div.className = "scan-result";
+  div.style.cssText = "background:#f0fdf4;border:1px solid #86efac;border-radius:14px;padding:16px;margin-top:10px";
+  div.innerHTML = `
+    <div style="font-size:13px;font-weight:700;color:#16a34a;margin-bottom:12px">✅ 인식 완료! 확인 후 수정하세요</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button onclick="scanResult.type='expense';showScanResult(scanResult)" style="flex:1;padding:10px;border-radius:10px;border:2px solid ${r.type==='expense'?'#ef4444':'#e2e8f0'};background:${r.type==='expense'?'#fef2f2':'#fff'};color:${r.type==='expense'?'#ef4444':'#94a3b8'};font-weight:700;font-size:13px;font-family:var(--font);cursor:pointer">❤️ 지출</button>
+      <button onclick="scanResult.type='income';showScanResult(scanResult)" style="flex:1;padding:10px;border-radius:10px;border:2px solid ${r.type==='income'?'#10b981':'#e2e8f0'};background:${r.type==='income'?'#ecfdf5':'#fff'};color:${r.type==='income'?'#10b981':'#94a3b8'};font-weight:700;font-size:13px;font-family:var(--font);cursor:pointer">💚 수입</button>
+    </div>
+    <select class="form-input" style="margin-bottom:10px" onchange="scanResult.category=this.value">${allCatOpts}</select>
+    <input class="form-input" type="number" style="margin-bottom:10px" value="${r.amount}" onchange="scanResult.amount=Number(this.value)" />
+    <input class="form-input" type="text" style="margin-bottom:10px" value="${r.note||''}" placeholder="사용처/메모" onchange="scanResult.note=this.value" />
+    <input class="form-input" type="date" style="margin-bottom:14px" value="${r.date}" onchange="scanResult.date=this.value" />
+    <button onclick="confirmScan()" style="width:100%;padding:13px;border-radius:12px;border:none;background:#10b981;color:#fff;font-weight:700;font-size:15px;font-family:var(--font);cursor:pointer">💾 가계부에 추가하기</button>`;
+  window.scanResult = r;
+  document.getElementById("scanBody").appendChild(div);
+}
+
+async function confirmScan() {
+  if (!window.scanResult) return;
+  await addTx(window.scanResult);
+  closeScan();
+  showToast("✓ 추가됐어요!");
 }
 
 // ══════════════════════════════════════════
