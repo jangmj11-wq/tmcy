@@ -923,8 +923,9 @@ async function confirmPaste() {
   const sel=pasteResults.filter((_,i)=>pasteChecked[i]);
   if(!sel.length) return;
   for(const r of sel) await addTx(r);
+  const totalAmt = sel.reduce((s,r)=>s+Number(r.amount),0);
   closePaste();
-  showToast(`✓ ${sel.length}건 추가됐어요!`);
+  setTimeout(()=>showToast(sel.length+"건 추가됐어요!", fmt(totalAmt)+" 추가됨"), 120);
 }
 
 // ══════════════════════════════════════════
