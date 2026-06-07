@@ -129,9 +129,13 @@
   .divider::before, .divider::after { content:""; flex:1; height:1px; background: var(--border); }
 
   /* ── 서브탭 ── */
-  .subtab-row { display: flex; gap: 6px; padding: 0 16px 12px; }
-  .subtab-btn { padding: 7px 14px; border-radius: 20px; border: 1px solid var(--border); background: var(--white); color: var(--sub); font-size: 12px; font-weight: 500; transition: all 0.15s; }
-  .subtab-btn.active { background: var(--primary-light); color: var(--primary); border-color: var(--primary); font-weight: 700; }
+  .subtab-row { display:flex; padding:0 12px 10px; gap:0; }
+  .subtab-btn { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; padding:9px 4px 7px; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; transition:all 0.18s; font-family:var(--font); }
+  .subtab-btn .sb-emoji { font-size:22px; line-height:1; transition:transform 0.18s; }
+  .subtab-btn .sb-label { font-size:10px; color:#94a3b8; font-weight:500; }
+  .subtab-btn.active { border-bottom-color:var(--primary); }
+  .subtab-btn.active .sb-emoji { transform:scale(1.12); }
+  .subtab-btn.active .sb-label { color:var(--primary); font-weight:700; }
 
   /* ── 바 게이지 ── */
   .bar-track { height: 6px; background: #f1f5f9; border-radius: 3px; overflow: hidden; }
@@ -182,6 +186,13 @@
   .empty { text-align: center; color: #cbd5e1; padding: 28px 0; font-size: 14px; }
 
   textarea.form-input { resize: vertical; line-height: 1.6; min-height: 160px; }
+  .owner-cat-row { border-radius:10px; margin-bottom:6px; overflow:hidden; border:1px solid #f1f5f9; }
+  .owner-cat-header { display:flex; align-items:center; gap:8px; padding:9px 10px; cursor:pointer; background:#fff; transition:background 0.15s; }
+  .owner-cat-header.open-p { background:#fff7ed; }
+  .owner-cat-header.open-s { background:#eff6ff; }
+  .owner-cat-detail { background:#f8fafc; border-top:1px solid #f1f5f9; padding:6px 10px 8px; }
+  .owner-detail-item { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #f1f5f9; }
+  .owner-detail-item:last-of-type { border-bottom:none; }
   .hint-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: #3b82f6; line-height: 1.6; }
   .error-box { background: var(--red-light); border: 1px solid #fecaca; border-radius: 10px; padding: 11px 14px; font-size: 13px; color: var(--red); margin-top: 10px; }
 
@@ -521,10 +532,10 @@ function renderStats() {
   let html = `
   <div class="month-row">${MONTHS.map((m,i)=>`<button class="month-btn${i===filterMonth?" active":""}" onclick="setMonth(${i})">${m}</button>`).join("")}</div>
   <div class="subtab-row">
-    <button class="subtab-btn${statsSubTab==="category"?" active":""}" onclick="setStatsSubTab('category')">📂 카테고리</button>
-    <button class="subtab-btn${statsSubTab==="place"?" active":""}"    onclick="setStatsSubTab('place')">🏪 사용처</button>
-    <button class="subtab-btn${statsSubTab==="monthly"?" active":""}"  onclick="setStatsSubTab('monthly')">📅 월별</button>
-    <button class="subtab-btn${statsSubTab==="owner"?" active":""}"    onclick="setStatsSubTab('owner')">👤 개인/공용</button>
+    <button class="subtab-btn${statsSubTab==="category"?" active":""}" onclick="setStatsSubTab('category')"><span class="sb-emoji">📂</span><span class="sb-label">카테고리</span></button>
+    <button class="subtab-btn${statsSubTab==="place"?" active":""}"    onclick="setStatsSubTab('place')"><span class="sb-emoji">🏪</span><span class="sb-label">사용처</span></button>
+    <button class="subtab-btn${statsSubTab==="monthly"?" active":""}"  onclick="setStatsSubTab('monthly')"><span class="sb-emoji">📅</span><span class="sb-label">월별</span></button>
+    <button class="subtab-btn${statsSubTab==="owner"?" active":""}"    onclick="setStatsSubTab('owner')"><span class="sb-emoji">👤</span><span class="sb-label">개인/공용</span></button>
   </div>`;
 
   if (statsSubTab==="category") {
@@ -576,32 +587,105 @@ function renderStats() {
   }
 
   else if (statsSubTab==="owner") {
-    const personalExp = filtered.filter(t=>t.type==="expense"&&(t.owner||"personal")==="personal").reduce((s,t)=>s+Number(t.amount),0);
-    const sharedExp   = filtered.filter(t=>t.type==="expense"&&(t.owner||"personal")==="shared").reduce((s,t)=>s+Number(t.amount),0);
+    const personalTxs = filtered.filter(t=>t.type==="expense"&&(t.owner||"personal")==="personal");
+    const sharedTxs   = filtered.filter(t=>t.type==="expense"&&(t.owner||"personal")==="shared");
+    const personalExp = personalTxs.reduce((s,t)=>s+Number(t.amount),0);
+    const sharedExp   = sharedTxs.reduce((s,t)=>s+Number(t.amount),0);
     const total = personalExp + sharedExp || 1;
+    const pPct = (personalExp/total*100).toFixed(0);
+
+    // 카테고리별 집계 함수
+    function groupByCat(txs) {
+      const map = {};
+      txs.forEach(t => {
+        if (!map[t.category]) map[t.category] = { amount:0, items:[] };
+        map[t.category].amount += Number(t.amount);
+        map[t.category].items.push(t);
+      });
+      return Object.entries(map)
+        .map(([id,v]) => ({ id, ...v, ...getCat(id) }))
+        .sort((a,b) => b.amount - a.amount);
+    }
+
+    // 카테고리 행 렌더 함수
+    function renderOwnerCatRows(cats, totalAmt, ownerKey) {
+      if (!cats.length) return `<div class="empty" style="padding:14px 0">내역이 없어요</div>`;
+      return cats.map(c => {
+        const pct = totalAmt > 0 ? (c.amount/totalAmt*100).toFixed(0) : 0;
+        const detailId = "ocd_" + ownerKey + "_" + c.id;
+        const items = c.items.sort((a,b)=>new Date(b.date)-new Date(a.date));
+        const isP = ownerKey === "personal";
+        return `
+        <div class="owner-cat-row" id="row_${detailId}">
+          <div class="owner-cat-header" onclick="toggleOwnerCat('${detailId}','${ownerKey}')">
+            <div style="width:30px;height:30px;border-radius:8px;background:${c.color}18;border:1px solid ${c.color}28;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">${c.emoji}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;font-weight:600;color:#0f172a">${c.label}</div>
+              <div style="display:flex;align-items:center;gap:5px;margin-top:2px">
+                <div class="bar-track" style="height:4px;flex:1"><div class="bar-fill" style="width:${pct}%;background:${c.color}"></div></div>
+                <span style="font-size:10px;color:#94a3b8;flex-shrink:0">${pct}%</span>
+              </div>
+            </div>
+            <div style="font-size:12px;font-weight:700;color:${c.color};flex-shrink:0;margin:0 6px">${fmt(c.amount)}</div>
+            <div id="chev_${detailId}" style="font-size:10px;color:#94a3b8;flex-shrink:0;transition:transform 0.2s">▼</div>
+          </div>
+          <div class="owner-cat-detail" id="${detailId}" style="display:none">
+            ${items.map(t=>`
+              <div class="owner-detail-item">
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#334155">${t.note||c.label}</div>
+                  <div style="font-size:10px;color:#94a3b8;margin-top:1px">${t.date}</div>
+                </div>
+                <div style="font-size:12px;font-weight:700;color:#ef4444">-${fmt(t.amount)}</div>
+              </div>`).join("")}
+            <div style="display:flex;justify-content:space-between;align-items:center;padding-top:7px;margin-top:2px;border-top:1px dashed ${c.color}44">
+              <span style="font-size:11px;font-weight:700;color:#94a3b8">${items.length}건 합계</span>
+              <span style="font-size:13px;font-weight:800;color:${c.color}">${fmt(c.amount)}</span>
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    const personalCats = groupByCat(personalTxs);
+    const sharedCats   = groupByCat(sharedTxs);
+
     html += `<div class="card">
-      <div class="card-title">${MONTHS[filterMonth]} 개인 vs 공용 지출</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:14px;text-align:center">
-          <div style="font-size:22px;margin-bottom:4px">👤</div>
-          <div style="font-size:11px;color:#f97316;font-weight:700;margin-bottom:2px">개인 지출</div>
-          <div style="font-size:16px;font-weight:800;color:#ea580c">${fmt(personalExp)}</div>
-          <div style="font-size:11px;color:#94a3b8;margin-top:2px">${(personalExp/total*100).toFixed(0)}%</div>
+      <!-- 요약 배지 -->
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <div style="flex:1;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:12px;padding:12px 10px;text-align:center">
+          <div style="font-size:20px;margin-bottom:2px">👤</div>
+          <div style="font-size:10px;font-weight:700;color:#f97316;margin-bottom:2px">개인 지출</div>
+          <div style="font-size:15px;font-weight:800;color:#ea580c">${fmt(personalExp)}</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:1px">${pPct}%</div>
         </div>
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px;text-align:center">
-          <div style="font-size:22px;margin-bottom:4px">👫</div>
-          <div style="font-size:11px;color:#3b82f6;font-weight:700;margin-bottom:2px">공용 지출</div>
-          <div style="font-size:16px;font-weight:800;color:#2563eb">${fmt(sharedExp)}</div>
-          <div style="font-size:11px;color:#94a3b8;margin-top:2px">${(sharedExp/total*100).toFixed(0)}%</div>
+        <div style="flex:1;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:12px;padding:12px 10px;text-align:center">
+          <div style="font-size:20px;margin-bottom:2px">👫</div>
+          <div style="font-size:10px;font-weight:700;color:#3b82f6;margin-bottom:2px">공용 지출</div>
+          <div style="font-size:15px;font-weight:800;color:#2563eb">${fmt(sharedExp)}</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:1px">${100-Number(pPct)}%</div>
         </div>
       </div>
-      <div style="height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden;margin-bottom:16px">
-        <div style="height:100%;background:linear-gradient(90deg,#f97316 ${(personalExp/total*100).toFixed(0)}%,#3b82f6 0);border-radius:5px"></div>
+      <!-- 비율 바 -->
+      <div style="height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden;margin-bottom:16px">
+        <div style="height:100%;background:linear-gradient(90deg,#f97316 ${pPct}%,#3b82f6 0);border-radius:4px"></div>
       </div>
-      <div style="font-size:13px;font-weight:700;color:var(--sub);margin-bottom:10px">개인 지출 내역</div>
-      ${filtered.filter(t=>t.type==="expense"&&(t.owner||"personal")==="personal").sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5).map(t=>{const c=getCat(t.category);return `<div class="tx-item"><div class="tx-left"><div class="tx-icon" style="background:${c.color}18;border:1px solid ${c.color}28">${c.emoji}</div><div><div class="tx-name">${t.note||c.label}</div><div class="tx-meta">${t.date} · ${c.label}</div></div></div><div class="tx-amount" style="color:#ef4444">-${fmt(t.amount)}</div></div>`}).join("")}
-      <div style="font-size:13px;font-weight:700;color:var(--sub);margin:14px 0 10px">공용 지출 내역</div>
-      ${filtered.filter(t=>t.type==="expense"&&(t.owner||"personal")==="shared").sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5).map(t=>{const c=getCat(t.category);return `<div class="tx-item"><div class="tx-left"><div class="tx-icon" style="background:${c.color}18;border:1px solid ${c.color}28">${c.emoji}</div><div><div class="tx-name">${t.note||c.label}</div><div class="tx-meta">${t.date} · ${c.label}</div></div></div><div class="tx-amount" style="color:#ef4444">-${fmt(t.amount)}</div></div>`}).join("")}
+
+      <!-- 개인 카테고리 -->
+      <div style="display:flex;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:700;color:#f97316">👤 개인 지출 카테고리</span>
+        <span style="margin-left:auto;font-size:12px;font-weight:800;color:#0f172a">${fmt(personalExp)}</span>
+      </div>
+      ${renderOwnerCatRows(personalCats, personalExp, "personal")}
+
+      <div style="height:1px;background:#f1f5f9;margin:14px 0"></div>
+
+      <!-- 공용 카테고리 -->
+      <div style="display:flex;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:700;color:#3b82f6">👫 공용 지출 카테고리</span>
+        <span style="margin-left:auto;font-size:12px;font-weight:800;color:#0f172a">${fmt(sharedExp)}</span>
+      </div>
+      ${renderOwnerCatRows(sharedCats, sharedExp, "shared")}
     </div>`;
   }
 
@@ -717,6 +801,20 @@ function saveFirebaseConfig() {
 // ── 유틸 ──
 function setMonth(i) { filterMonth=i; render(); }
 function setStatsSubTab(t) { statsSubTab=t; renderStats(); }
+
+function toggleOwnerCat(detailId, ownerKey) {
+  const detail = document.getElementById(detailId);
+  const chev   = document.getElementById("chev_" + detailId);
+  const header = detail?.previousElementSibling;
+  if (!detail) return;
+  const isOpen = detail.style.display !== "none";
+  detail.style.display = isOpen ? "none" : "block";
+  if (chev) chev.style.transform = isOpen ? "" : "rotate(180deg)";
+  if (header) {
+    header.classList.remove("open-p","open-s");
+    if (!isOpen) header.classList.add(ownerKey==="personal"?"open-p":"open-s");
+  }
+}
 
 function showError(msg) {
   const t     = document.getElementById("toast");
