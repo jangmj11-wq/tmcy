@@ -286,6 +286,7 @@ let tab = "home";
 let filterMonth = new Date().getMonth();
 let filterYear  = new Date().getFullYear();
 let statsSubTab = "category";
+let calSelectedDate = null;
 let transactions = [];   // Firestore 실시간 동기화
 let budgets = {};        // Firestore 저장
 let editBudgetId = null;
@@ -690,7 +691,113 @@ function renderStats() {
   }
 
   else {
-    html += `<div class="card"><div class="card-title">${filterYear}년 월별 수입/지출</div><canvas id="barChart" height="220"></canvas></div>`;
+    // 달력 데이터 계산
+    const calYear  = filterYear;
+    const calMonth = filterMonth;
+    const firstDay = new Date(calYear, calMonth, 1).getDay(); // 0=일
+    const lastDate = new Date(calYear, calMonth+1, 0).getDate();
+    const prevLastDate = new Date(calYear, calMonth, 0).getDate();
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0,10);
+
+    // 날짜별 거래 집계
+    const dayMap = {};
+    transactions.forEach(t => {
+      const d = new Date(t.date);
+      if (d.getFullYear()===calYear && d.getMonth()===calMonth) {
+        if (!dayMap[t.date]) dayMap[t.date] = { exp:0, inc:0, txs:[], cats:[] };
+        if (t.type==="expense") { dayMap[t.date].exp+=Number(t.amount); dayMap[t.date].cats.push(getCat(t.category).color); }
+        else dayMap[t.date].inc+=Number(t.amount);
+        dayMap[t.date].txs.push(t);
+      }
+    });
+
+    // 달력 셀 생성
+    function makeCell(day, monthOffset, dateStr) {
+      const isToday = dateStr === todayStr;
+      const isSelected = dateStr === calSelectedDate;
+      const data = dayMap[dateStr];
+      const isOther = monthOffset !== 0;
+      const dow = new Date(dateStr).getDay();
+      const colorClass = isOther ? "#cbd5e1" : dow===0 ? "#ef4444" : dow===6 ? "#6366f1" : "#334155";
+      const bg = isSelected ? "background:#eef2ff;" : "";
+      const dayEl = isToday
+        ? `<div style="width:20px;height:20px;border-radius:50%;background:#6366f1;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">${day}</div>`
+        : `<span style="font-size:12px;font-weight:${isSelected?700:500};color:${isSelected?"#6366f1":colorClass};line-height:1.2">${day}</span>`;
+      let dots = "", amt = "";
+      if (data && !isOther) {
+        const uniqCats = [...new Set(data.cats)].slice(0,3);
+        dots = `<div style="display:flex;gap:2px;margin-top:2px">${uniqCats.map(c=>`<div style="width:4px;height:4px;border-radius:50%;background:${c}"></div>`).join("")}${data.inc>0?`<div style="width:4px;height:4px;border-radius:50%;background:#10b981"></div>`:""}</div>`;
+        if (data.exp>0) amt = `<div style="font-size:8px;color:#ef4444;font-weight:600;margin-top:1px;line-height:1">${data.exp>=10000?(data.exp/10000).toFixed(data.exp%10000===0?0:1)+"만":data.exp+"원"}</div>`;
+      }
+      return `<div onclick="selectCalDay('${dateStr}')" style="display:flex;flex-direction:column;align-items:center;padding:3px 1px;border-radius:7px;cursor:pointer;min-height:38px;${bg}">${dayEl}${dots}${amt}</div>`;
+    }
+
+    let cells = "";
+    // 이전 달
+    for (let i=firstDay-1; i>=0; i--) {
+      const d = prevLastDate-i;
+      const ds = `${calYear}-${String(calMonth).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      cells += makeCell(d, -1, ds);
+    }
+    // 이번 달
+    for (let d=1; d<=lastDate; d++) {
+      const ds = `${calYear}-${String(calMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      cells += makeCell(d, 0, ds);
+    }
+    // 다음 달
+    const totalCells = Math.ceil((firstDay+lastDate)/7)*7;
+    for (let d=1; d<=totalCells-(firstDay+lastDate); d++) {
+      const ds = `${calYear}-${String(calMonth+2).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      cells += makeCell(d, 1, ds);
+    }
+
+    // 선택 날 상세
+    let dayDetail = "";
+    if (calSelectedDate && dayMap[calSelectedDate]) {
+      const selTxs = dayMap[calSelectedDate].txs.sort((a,b)=>a.type==="income"?1:-1);
+      const selExp = dayMap[calSelectedDate].exp;
+      const selInc = dayMap[calSelectedDate].inc;
+      const [sy,sm,sd] = calSelectedDate.split("-");
+      dayDetail = `
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid #f1f5f9">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:12px;font-weight:700;color:#64748b">${Number(sm)}월 ${Number(sd)}일 내역</span>
+            <div style="display:flex;gap:6px">
+              ${selInc>0?`<span style="font-size:12px;font-weight:700;color:#10b981">+${fmt(selInc)}</span>`:""}
+              ${selExp>0?`<span style="font-size:12px;font-weight:700;color:#ef4444">-${fmt(selExp)}</span>`:""}
+            </div>
+          </div>
+          ${selTxs.map(t=>{
+            const c=getCat(t.category);
+            const isShared=(t.owner||"personal")==="shared";
+            return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f8fafc">
+              <div style="width:28px;height:28px;border-radius:8px;background:${c.color}18;border:1px solid ${c.color}28;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">${c.emoji}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:11px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.note||c.label}</div>
+                <div style="font-size:10px;color:#94a3b8;margin-top:1px">${c.label} · ${isShared?"👫 공용":"👤 개인"}</div>
+              </div>
+              <div style="font-size:12px;font-weight:700;color:${t.type==="income"?"#10b981":"#ef4444"};flex-shrink:0">${t.type==="income"?"+":"-"}${fmt(t.amount)}</div>
+            </div>`;
+          }).join("")}
+        </div>`;
+    }
+
+    html += `
+      <div class="card"><div class="card-title">${filterYear}년 월별 수입/지출</div><canvas id="barChart" height="180"></canvas></div>
+      <div class="card">
+        <div class="card-title">${MONTHS[filterMonth]} 달력</div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px">
+          ${["일","월","화","수","목","금","토"].map((d,i)=>`<div style="text-align:center;font-size:10px;font-weight:700;color:${i===0?"#ef4444":i===6?"#6366f1":"#94a3b8"};padding:3px 0">${d}</div>`).join("")}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">${cells}</div>
+        <div style="display:flex;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid #f1f5f9">
+          <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#94a3b8"><div style="width:6px;height:6px;border-radius:50%;background:#ef4444"></div>지출</div>
+          <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#94a3b8"><div style="width:6px;height:6px;border-radius:50%;background:#10b981"></div>수입</div>
+          <div style="font-size:10px;color:#cbd5e1;margin-left:auto">날짜 탭 → 상세</div>
+        </div>
+        ${dayDetail}
+      </div>`;
   }
 
   document.getElementById("content").innerHTML = html;
@@ -703,7 +810,7 @@ function renderStats() {
     }
     if (statsSubTab==="monthly") {
       const ctx = document.getElementById("barChart");
-      if (ctx) new Chart(ctx, { type:"bar", data:{ labels:MONTHS, datasets:[{label:"수입",data:monthlyInc,backgroundColor:"#10b981",borderRadius:4},{label:"지출",data:monthlyExp,backgroundColor:"#ef4444",borderRadius:4}] }, options:{ responsive:true, plugins:{legend:{labels:{font:{family:"Noto Sans KR",size:12}}}}, scales:{ x:{grid:{display:false},ticks:{font:{family:"Noto Sans KR",size:11}}}, y:{grid:{color:"#f1f5f9"},ticks:{font:{family:"Noto Sans KR",size:10},callback:v=>v>=10000?`${v/10000}만`:v}} } } });
+      if (ctx) new Chart(ctx, { type:"bar", data:{ labels:[1,2,3,4,5,6,7,8,9,10,11,12], datasets:[{label:"수입",data:monthlyInc,backgroundColor:"#10b981",borderRadius:4},{label:"지출",data:monthlyExp,backgroundColor:"#ef4444",borderRadius:4}] }, options:{ responsive:true, plugins:{legend:{labels:{font:{family:"Noto Sans KR",size:12}}}}, scales:{ x:{grid:{display:false},ticks:{font:{family:"Noto Sans KR",size:11},color:"#94a3b8"}}, y:{grid:{color:"#f1f5f9"},ticks:{font:{family:"Noto Sans KR",size:10},callback:v=>v>=10000?`${v/10000}만`:v}} } } });
     }
   });
 }
@@ -800,7 +907,11 @@ function saveFirebaseConfig() {
 
 // ── 유틸 ──
 function setMonth(i) { filterMonth=i; render(); }
-function setStatsSubTab(t) { statsSubTab=t; renderStats(); }
+function setStatsSubTab(t) { statsSubTab=t; calSelectedDate=null; renderStats(); }
+function selectCalDay(dateStr) {
+  calSelectedDate = calSelectedDate===dateStr ? null : dateStr;
+  renderStats();
+}
 
 function toggleOwnerCat(detailId, ownerKey) {
   const detail = document.getElementById(detailId);
